@@ -1,5 +1,5 @@
 CC      := gcc
-CFLAGS  := -Wall -Wextra -g3
+CFLAGS  := -Wall -Wextra -O2
 LDFLAGS := -lX11 -lXtst
 PROGS   := bot
 

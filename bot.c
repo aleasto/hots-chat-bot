@@ -25,7 +25,7 @@
 #define MIN_ADDRESS 0x6000000
 #define MAX_ADDRESS 0x40000000
 
-#define CHANNEL_NAME "test bot"
+#define CHANNEL_NAME "elitesparkle"
 #define EXCLUDE_MSG " Channel:" // `Joined Channel:` or Left Channel:`
 #define BOT_PREFIX '?'
 

@@ -24,8 +24,6 @@
 #define X_WINDOW_NAME "Heroes of the Storm"
 #define MIN_ADDRESS 0x6000000
 #define MAX_ADDRESS 0x40000000
-
-#define CHANNEL_NAME "elitesparkle"
 #define EXCLUDE_MSG " Channel:" // `Joined Channel:` or Left Channel:`
 #define BOT_PREFIX '?'
 
@@ -39,21 +37,23 @@ void clear_chat();
 
 message_entry_t* tracked_messages_g = NULL;
 Display* x_display;
+char* channel_name_g;
 
 int main(int argc, char* argv[]) {
-    pid_t pid;
-    if (argc > 1) {
-        pid = atoi(argv[1]);
-    } else {
-        char line[PID_LEN];
-        FILE *cmd = popen("pidof "PROC_NAME, "r");
-        fgets(line, PID_LEN, cmd);
-        pid = strtoul(line, NULL, 10 /* base */);
-        pclose(cmd);
-        if (pid == 0) {
-            fprintf(stderr, "No such process: " PROC_NAME "\n");
-            return EXIT_FAILURE;
-        }
+    if (argc < 2) {
+        fprintf(stderr, "Specify a channel name\n");
+        return EXIT_FAILURE;
+    }
+    channel_name_g = argv[1];
+
+    char line[PID_LEN];
+    FILE *cmd = popen("pidof "PROC_NAME, "r");
+    fgets(line, PID_LEN, cmd);
+    pid_t pid = strtoul(line, NULL, 10 /* base */);
+    pclose(cmd);
+    if (pid == 0) {
+        fprintf(stderr, "No such process: " PROC_NAME "\n");
+        return EXIT_FAILURE;
     }
     x_display = XOpenDisplay(NULL);
 
@@ -87,15 +87,17 @@ int search_memory(pid_t pid) {
     time_string[strlen(time_string) - 1] = '\0';
     printf("[%s] Searching %p:%p for chat logs\n", time_string, first->start, last->start + last->length);
 
+    char search_pattern[1024];
+    sprintf(search_pattern, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%s\">", channel_name_g);
+
     char mem_filename[MEM_FILENAME_LEN + 1];
     snprintf(mem_filename, MEM_FILENAME_LEN, "/proc/%ld/mem", (long)pid);
-
     ptrace(PTRACE_ATTACH, pid, NULL, NULL); // pause the process while we're reading its memory
     waitpid(pid, NULL, 0);
     int fd = open(mem_filename, O_RDWR);
     message_entry_t* temp_message_list = NULL;
     for (curr = last; curr != first; curr = curr->next)
-        search_at(fd, curr->start, curr-> length, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\""CHANNEL_NAME"\">", &temp_message_list);
+        search_at(fd, curr->start, curr-> length, search_pattern, &temp_message_list);
     close(fd);
     ptrace(PTRACE_DETACH, pid, NULL, NULL);
     free_mem_stats(list);
@@ -127,7 +129,7 @@ void parse_xml(char* str, message_entry_t** new_list) {
     int sender_id;
     char* sender_name;
     char* message;
-    if (sscanf(str, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\""CHANNEL_NAME"\">[%*d. "CHANNEL_NAME"]</a> <a name=\"PresenceId\" href=\"%d\">%m[^:]:</a> %m[^<]</s>",
+    if (sscanf(str, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%*[^\"]\">[%*d. %*[^]]]</a> <a name=\"PresenceId\" href=\"%d\">%m[^:]:</a> %m[^<]</s>",
         &sender_id, &sender_name, &message) < 3) {
         return;
     }

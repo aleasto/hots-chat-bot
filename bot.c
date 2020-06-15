@@ -21,7 +21,6 @@
 #define PID_LEN 12
 #define MEM_FILENAME_LEN PID_LEN + 10
 #define PROC_NAME "HeroesOfTheStor"
-#define X_WINDOW_NAME "Heroes of the Storm"
 #define MIN_ADDRESS 0x6000000
 #define MAX_ADDRESS 0x40000000
 #define EXCLUDE_MSG " Channel:" // `Joined Channel:` or Left Channel:`

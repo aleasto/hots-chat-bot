@@ -1,46 +1,46 @@
 from requests import get
 from requests.exceptions import RequestException
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 def get_talents(url):
     """
     Attempts to get the talents of a build at
-    the specified page. If there's something wrong,
-    it will return null.
+    the specified page. The result is a talent string ("T0000000").
+    If there's something wrong,
+    it will return a partially invalid talent string.
+
     """
+    options = Options()
+    options.headless = True
+    driver = webdriver.Firefox(options=options)
+    driver.get(url)
+    driver.maximize_window()
+
+    output = list("0000000")
+
     try:
-        with get(url, stream=True) as res:
-            if is_res_valid(res):
-                return parse_page(res)
-            else:
-                return None
-    except RequestException as e:
-        handle_error(str(e))
-        return None
-
-def is_res_valid(res):
-    """
-    Returns True if the response is HTML, False otherwise.
-    """
-    content_type = res.headers['Content-Type'].lower()
-    return (res.status_code == 200
-            and content_type is not None
-            and content_type.find('html') > -1)
-
-def handle_error(e):
-    print(e)
-
-def parse_page(res):
-    raw_html = res.content
-    
-    html = BeautifulSoup(raw_html, 'html.parser')
-
-    t_tiers = html.select(".talent-tree.live.active > .talent-tier")
-
-    for tier in t_tiers:
-        tier_talents = tier.select("li")
-        for index, talent in enumerate(tier_talents):
-            if (talent.has_attr("class")):
-                print(talent["class"])
-    return 0
-
+        # Wait for the page to load and mark the correct talents
+        talent_container = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".talent-tree.live.active"))
+        )
+        # For each tier, for each talent, find the corrent one
+        tiers = talent_container.find_elements_by_css_selector(".talent-tier")
+        for tier_index, tier in enumerate(tiers):
+            for talent_index, talent in enumerate(tier.find_elements_by_css_selector("li")):
+                talent_classlist = talent.get_attribute("class")
+                if ("talent-icon__container active" == talent_classlist):
+                    print(tier_index, talent_index)
+                    # Replace the talent number in the talent string
+                    output[tier_index] = str(talent_index + 1)
+    except Exception as e:
+        print(str(e))
+    finally:
+        # Very slow on my machine, perhaps driver.close() is faster, with a shared instance?
+        driver.quit()
+        # Print output
+        talent_string = "T" + "".join(output)
+        return talent_string

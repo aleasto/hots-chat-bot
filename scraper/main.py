@@ -1,8 +1,3 @@
-from requests import get
-from requests.exceptions import RequestException
-from contextlib import closing
-from bs4 import BeautifulSoup
-
 from sites import psionicstorm
 
 if __name__ == '__main__':

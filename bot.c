@@ -71,9 +71,10 @@ int main(int argc, char* argv[]) {
     pthread_mutex_init(&output_lock, NULL);
 
     printf("HIGHTLIGHT GAME WINDOW NOW!\n");
+    sleep(5);
     for (;;) {
-        sleep(4);
         search_memory(pid);
+        sleep(2);
     }
     free_message_list(tracked_messages_g);
 

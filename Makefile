@@ -1,6 +1,6 @@
 CC      := gcc
-CFLAGS  := -Wall -Wextra -O2
-LDFLAGS := -lX11 -lXtst
+CFLAGS  := -Wall -Wextra -O2 -pthread
+LDFLAGS := -lX11 -lXtst -pthread
 PROGS   := bot
 
 .PHONY: all clean

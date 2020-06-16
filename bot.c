@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/ptrace.h>
@@ -27,16 +28,26 @@
 #define BOT_PREFIX '?'
 
 int search_memory(pid_t pid);
-void search_at(int fd, void* start, size_t length, char* str, message_entry_t** new_list);
+void* search_at(void* args);
 void parse_xml(char* str, message_entry_t** new_list);
 void on_new_message(int sender_id, char* sender_name, char* message);
 void send_build_message(char* hero, char* talent_tree);
 void send_error_message(char* str);
 void clear_chat();
 
+pthread_mutex_t list_lock;
+pthread_mutex_t output_lock;
 message_entry_t* tracked_messages_g = NULL;
 Display* x_display;
 char* channel_name_g;
+
+struct search_arguments {
+    char* filename;
+    void* start;
+    size_t len;
+    char* pattern;
+    message_entry_t** output_list;
+};
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -56,15 +67,26 @@ int main(int argc, char* argv[]) {
     }
     x_display = XOpenDisplay(NULL);
 
+    pthread_mutex_init(&list_lock, NULL);
+    pthread_mutex_init(&output_lock, NULL);
+
     printf("HIGHTLIGHT GAME WINDOW NOW!\n");
     for (;;) {
         sleep(4);
         search_memory(pid);
     }
     free_message_list(tracked_messages_g);
+
+    pthread_mutex_destroy(&list_lock);
+    pthread_mutex_destroy(&output_lock);
 }
 
 int search_memory(pid_t pid) {
+    char mem_filename[MEM_FILENAME_LEN + 1];
+    snprintf(mem_filename, MEM_FILENAME_LEN, "/proc/%ld/mem", (long)pid);
+    ptrace(PTRACE_ATTACH, pid, NULL, NULL); // pause the process while we're reading its memory
+    waitpid(pid, NULL, 0);
+
     address_range* list;
     list = mem_stats(pid);
     if (!list) {
@@ -81,24 +103,42 @@ int search_memory(pid_t pid) {
             last = curr;
         }
     }
+    int regions_count = 0;
+    for (curr = last; curr != first; curr = curr->next) {
+        if (curr->perms & PERMS_READ) {
+            regions_count++;
+        }
+    }
+
     time_t ltime = time(NULL);
     char* time_string = asctime(localtime(&ltime));
     time_string[strlen(time_string) - 1] = '\0';
-    printf("[%s] Searching %p:%p for chat logs\n", time_string, first->start, last->start + last->length);
+    printf("[%s] Searching %d regions at %p:%p for chat logs\n", time_string, regions_count, first->start, last->start + last->length);
 
     char search_pattern[1024];
     sprintf(search_pattern, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%s\">", channel_name_g);
 
-    char mem_filename[MEM_FILENAME_LEN + 1];
-    snprintf(mem_filename, MEM_FILENAME_LEN, "/proc/%ld/mem", (long)pid);
-    ptrace(PTRACE_ATTACH, pid, NULL, NULL); // pause the process while we're reading its memory
-    waitpid(pid, NULL, 0);
-    int fd = open(mem_filename, O_RDWR);
+    pthread_t* tid = malloc(sizeof(pthread_t) * regions_count);   // one thread per region
     message_entry_t* temp_message_list = NULL;
-    for (curr = last; curr != first; curr = curr->next)
-        search_at(fd, curr->start, curr-> length, search_pattern, &temp_message_list);
-    close(fd);
+    int thread_no = 0;
+    for (curr = last; curr != first; curr = curr->next) {
+        if (curr->perms & PERMS_READ) {
+            struct search_arguments* args = malloc(sizeof(*args));  // thread must free me
+            args->filename = mem_filename;
+            args->start = curr->start;
+            args->len = curr->length;
+            args->pattern = search_pattern;
+            args->output_list = &temp_message_list;
+            pthread_create(&tid[thread_no], NULL, search_at, args);
+            thread_no++;
+        }
+    }
+    for (thread_no = 0; thread_no < regions_count; thread_no++) {
+        pthread_join(tid[thread_no], NULL);
+    }
+
     ptrace(PTRACE_DETACH, pid, NULL, NULL);
+    free(tid);
     free_mem_stats(list);
 
     free_message_list(tracked_messages_g);
@@ -107,21 +147,38 @@ int search_memory(pid_t pid) {
     return 0;
 }
 
-void search_at(int fd, void* start, size_t length, char* str, message_entry_t** new_list) {
-    char* buf = malloc(sizeof(char) * length);
-    lseek(fd, (size_t)start, SEEK_SET);
-    read(fd, buf, length);
+void* search_at(void* a) {
+    struct search_arguments* args = (struct search_arguments*) a;
+    char* buf = malloc(sizeof(*buf) * args->len);
+    if (buf == NULL) {
+        goto error_malloc;
+    }
+    int fd = open(args->filename, O_RDWR);
+    if (fd < 0) {
+        goto error_open;
+    }
+    ssize_t read = pread(fd, buf, args->len, (size_t)args->start);
+    if (read < 0) {
+        goto error_read;
+    }
 
-    int search_len = strlen(str);
-    for (size_t i = 0; i < length; i++) {
-        if (buf[i] == str[0]) {
-            if (!memcmp(buf + i, str, search_len) && !strstr(buf + i, EXCLUDE_MSG)) {
-                parse_xml(buf + i, new_list);
+    int search_len = strlen(args->pattern);
+    for (size_t i = 0; i < args->len; i++) {
+        if (buf[i] == args->pattern[0]) {
+            if (!memcmp(buf + i, args->pattern, search_len) && !strstr(buf + i, EXCLUDE_MSG)) {
+                parse_xml(buf + i, args->output_list);
                 i += strlen(buf + i) - 1;
             }
         }
     }
+
+error_read:
+    close(fd);
+error_open:
     free(buf);
+error_malloc:
+    free(a);
+    return NULL;
 }
 
 void parse_xml(char* str, message_entry_t** new_list) {
@@ -138,7 +195,9 @@ void parse_xml(char* str, message_entry_t** new_list) {
             on_new_message(sender_id, sender_name, message);
         }
     }
+    pthread_mutex_lock(&list_lock);
     push_message(new_list, sender_id, sender_name, message);
+    pthread_mutex_unlock(&list_lock);
     free(sender_name);
     free(message);
 }
@@ -154,6 +213,7 @@ void on_new_message(int sender_id, char* sender_name, char* message) {
     free(replaced_apos);
     free(replaced_apos_dot);
 
+    pthread_mutex_lock(&output_lock);
     char* talent_tree = search_talent_data(replaced_apos_dot_dash);
     if (talent_tree != NULL) {
         send_build_message(replaced_apos_dot_dash, talent_tree);
@@ -164,6 +224,8 @@ void on_new_message(int sender_id, char* sender_name, char* message) {
         send_error_message(error_buf);
         free(error_buf);
     }
+    pthread_mutex_unlock(&output_lock);
+
     free(parsed_name);
     free(replaced_apos_dot_dash);
 }
@@ -183,7 +245,11 @@ void send_error_message(char* str) {
 }
 
 void clear_chat() {
+    pthread_mutex_lock(&output_lock);
+
     XWriteSymbol(x_display, XK_slash);
     XWriteString(x_display, "clear");
     XWriteSymbol(x_display, XK_Return);
+
+    pthread_mutex_unlock(&output_lock);
 }

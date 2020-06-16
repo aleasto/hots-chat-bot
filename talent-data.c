@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DATA_FILE "talent.data"
@@ -21,6 +22,7 @@ char* search_talent_data(char* hero_name) {
             return strdup(talent_tree_buf);
         }
     }
+    free(line);
 
 nomatch:
     return NULL;

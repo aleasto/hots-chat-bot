@@ -184,11 +184,11 @@ error_malloc:
 
 void parse_xml(char* str, message_entry_t** new_list) {
     int sender_id;
-    char* sender_name;
-    char* message;
+    char* sender_name = NULL;
+    char* message = NULL;
     if (sscanf(str, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%*[^\"]\">[%*d. %*[^]]]</a> <a name=\"PresenceId\" href=\"%d\">%m[^:]:</a> %m[^<]</s>",
         &sender_id, &sender_name, &message) < 3) {
-        return;
+        goto leave;
     }
     if (!find_message(tracked_messages_g, sender_id, sender_name, message)) {
         clear_chat();   // try to free game memory
@@ -199,6 +199,8 @@ void parse_xml(char* str, message_entry_t** new_list) {
     pthread_mutex_lock(&list_lock);
     push_message(new_list, sender_id, sender_name, message);
     pthread_mutex_unlock(&list_lock);
+
+leave:
     free(sender_name);
     free(message);
 }

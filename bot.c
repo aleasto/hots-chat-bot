@@ -29,8 +29,7 @@ int search_memory(pid_t pid);
 void* search_at(void* args);
 void parse_xml(char* str);
 void on_new_message(int sender_id, char* sender_name, char* message);
-void send_build_message(char* hero, char* talent_tree);
-void send_error_message(char* str);
+void send_message(char* str);
 void clear_chat();
 
 pthread_mutex_t output_lock;
@@ -199,43 +198,29 @@ void on_new_message(int sender_id, char* sender_name, char* message) {
     free(replaced_apos);
     free(replaced_apos_dot);
 
-    pthread_mutex_lock(&output_lock);
     char* talent_tree = search_talent_data(replaced_apos_dot_dash);
+    char* out_buf = malloc(sizeof(char) * strlen(parsed_name) + 128);
+    out_buf[0] = '\0';
     if (talent_tree != NULL) {
-        send_build_message(replaced_apos_dot_dash, talent_tree);
+        sprintf(out_buf, "[%s,%s]", talent_tree, replaced_apos_dot_dash);
         free(talent_tree);
     } else {
-        char* error_buf = malloc(sizeof(char) * (strlen(parsed_name) + 128));
-        sprintf(error_buf, "Could not find hero %s", parsed_name);
-        send_error_message(error_buf);
-        free(error_buf);
+        sprintf(out_buf, "Could not find hero %s", parsed_name);
     }
-    pthread_mutex_unlock(&output_lock);
+    send_message(out_buf);
 
+    free(out_buf);
     free(parsed_name);
     free(replaced_apos_dot_dash);
 }
 
-void send_build_message(char* hero_name, char* talent_tree) {
-    XWriteSymbol(x_display, XK_bracketleft);
-    XWriteString(x_display, talent_tree);
-    XWriteSymbol(x_display, XK_comma);
-    XWriteString(x_display, hero_name);
-    XWriteSymbol(x_display, XK_bracketright);
-    XWriteSymbol(x_display, XK_Return);
-}
-
-void send_error_message(char* str) {
+void send_message(char* str) {
+    pthread_mutex_lock(&output_lock);
     XWriteString(x_display, str);
     XWriteSymbol(x_display, XK_Return);
+    pthread_mutex_unlock(&output_lock);
 }
 
 void clear_chat() {
-    pthread_mutex_lock(&output_lock);
-
-    XWriteSymbol(x_display, XK_slash);
-    XWriteString(x_display, "clear");
-    XWriteSymbol(x_display, XK_Return);
-
-    pthread_mutex_unlock(&output_lock);
+    send_message("/clear");
 }

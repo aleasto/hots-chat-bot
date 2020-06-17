@@ -4,38 +4,31 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <time.h>
 #include <pthread.h>
-#include <ctype.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/ptrace.h>
-#include <sys/mman.h>
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 
 #include "mem-stats.h"
 #include "x-additions.h"
-#include "string-additions.h"
-#include "talent-data.h"
 
 #define PID_LEN 12
 #define MEM_FILENAME_LEN PID_LEN + 10
 #define PROC_NAME "HeroesOfTheStor"
 #define MIN_ADDRESS 0x6000000
 #define MAX_ADDRESS 0x40000000
-#define BOT_PREFIX '?'
 
 int search_memory(pid_t pid);
 void* search_at(void* args);
 void parse_xml(char* str);
-void on_new_message(int sender_id, char* sender_name, char* message);
-void send_message(char* str);
 void clear_chat();
 
 pthread_mutex_t output_lock;
 Display* x_display;
 char* channel_name_g;
+void (*new_message_cb_g)(int, char*, char*);
 
 struct search_arguments {
     char* filename;
@@ -44,35 +37,48 @@ struct search_arguments {
     char* pattern;
 };
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Specify a channel name\n");
-        return EXIT_FAILURE;
-    }
-    channel_name_g = argv[1];
-
+/* public interface */
+int hots_bot_listen(char* channel_name, int polling_rate) {
     char line[PID_LEN];
     FILE *cmd = popen("pidof "PROC_NAME, "r");
     fgets(line, PID_LEN, cmd);
     pid_t pid = strtoul(line, NULL, 10 /* base */);
     pclose(cmd);
-    if (pid == 0) {
+    if (!pid) {
         fprintf(stderr, "No such process: " PROC_NAME "\n");
         return EXIT_FAILURE;
     }
     x_display = XOpenDisplay(NULL);
-
+    if (!x_display) {
+        fprintf(stderr, "Could not open X display");
+        return EXIT_FAILURE;
+    }
+    channel_name_g = strdup(channel_name);
     pthread_mutex_init(&output_lock, NULL);
 
-    printf("HIGHTLIGHT GAME WINDOW NOW!\n");
-    sleep(5);
     for (;;) {
         search_memory(pid);
-        sleep(2);
+        sleep(polling_rate);
     }
 
+    XCloseDisplay(x_display);
+    free(channel_name_g);
     pthread_mutex_destroy(&output_lock);
+
+    return 0;
 }
+
+void hots_bot_set_new_message_cb(void (*cb)(int, char*, char*)) {
+    new_message_cb_g = cb;
+}
+
+void hots_bot_send_message(char* str) {
+    pthread_mutex_lock(&output_lock);
+    XWriteString(x_display, str);
+    XWriteSymbol(x_display, XK_Return);
+    pthread_mutex_unlock(&output_lock);
+}
+/* end public interface */
 
 int search_memory(pid_t pid) {
     char mem_filename[MEM_FILENAME_LEN + 1];
@@ -102,11 +108,6 @@ int search_memory(pid_t pid) {
             regions_count++;
         }
     }
-
-    time_t ltime = time(NULL);
-    char* time_string = asctime(localtime(&ltime));
-    time_string[strlen(time_string) - 1] = '\0';
-    printf("[%s] Searching %d regions at %p:%p for chat logs\n", time_string, regions_count, first->start, last->start + last->length);
 
     char search_pattern[1024];
     sprintf(search_pattern, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%s\">", channel_name_g);
@@ -172,57 +173,19 @@ error_malloc:
 }
 
 void parse_xml(char* str) {
-    printf("%s\n", str);
     int sender_id;
     char* sender_name = NULL;
     char* message = NULL;
     clear_chat();   // try to free game memory
     if (sscanf(str, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%*[^\"]\">[%*d. %*[^]]]</a> <a name=\"PresenceId\" href=\"%d\">%m[^:]:</a> %m[^<]</s>",
         &sender_id, &sender_name, &message) == 3) {
-        if (message[0] == BOT_PREFIX) {
-            on_new_message(sender_id, sender_name, message);
-        }
+        new_message_cb_g(sender_id, sender_name, message);
     }
 
     free(sender_name);
     free(message);
 }
 
-void on_new_message(int sender_id, char* sender_name, char* message) {
-    printf("[%d]%s: %s\n", sender_id, sender_name, message);
-
-    char* parsed_name;
-    sscanf(message, "?%ms", &parsed_name);
-    char* replaced_apos = str_replace(parsed_name, "&apos;", "");
-    char* replaced_apos_dot = str_replace(replaced_apos, ".", "");
-    char* final_hero_name = str_replace(replaced_apos_dot, "-", "");
-    free(replaced_apos);
-    free(replaced_apos_dot);
-
-    for (char* p = final_hero_name; *p; ++p) *p = tolower(*p);
-    char* talent_tree = search_talent_data(final_hero_name);
-    char* out_buf = malloc(sizeof(char) * strlen(parsed_name) + 128);
-    out_buf[0] = '\0';
-    if (talent_tree != NULL) {
-        sprintf(out_buf, "[%s,%s]", talent_tree, final_hero_name);
-        free(talent_tree);
-    } else {
-        sprintf(out_buf, "Could not find hero %s", parsed_name);
-    }
-    send_message(out_buf);
-
-    free(out_buf);
-    free(parsed_name);
-    free(final_hero_name);
-}
-
-void send_message(char* str) {
-    pthread_mutex_lock(&output_lock);
-    XWriteString(x_display, str);
-    XWriteSymbol(x_display, XK_Return);
-    pthread_mutex_unlock(&output_lock);
-}
-
 void clear_chat() {
-    send_message("/clear");
+    hots_bot_send_message("/clear");
 }

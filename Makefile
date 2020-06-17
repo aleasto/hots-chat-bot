@@ -1,17 +1,26 @@
+MAKE    := make
 CC      := gcc
-CFLAGS  := -Wall -Wextra -O2 -pthread
-LDFLAGS := -lX11 -lXtst -pthread
-PROGS   := bot
+CFLAGS  := -fPIC -Wall -Wextra -O2 -pthread -Iinclude
+LDFLAGS := -shared -lX11 -lXtst -pthread
+TARGET  := libhotsbot.so
 
-.PHONY: all clean
+SRCS    := $(wildcard *.c)
+OBJECTS := $(SRCS:.c=.o)
 
-all: clean $(PROGS)
+SUBDIRS := $(wildcard **/*/.)
+
+.PHONY: all clean $(SUBDIRS)
+
+all: clean $(TARGET) $(SUBDIRS)
 
 clean:
-	rm -f *.o $(PROGS)
+	rm -f *.o $(TARGET)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $^
 
-bot: mem-stats.o x-additions.o string-additions.o talent-data.o bot.o
+$(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
+
+$(SUBDIRS):
+	$(MAKE) -C $@

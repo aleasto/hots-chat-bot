@@ -1,6 +1,6 @@
 # C
 *.o
-bot
+*.so
 
 # Python
 __pycache__/

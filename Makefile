@@ -13,5 +13,5 @@ clean:
 %.o: %.c
 	$(CC) $(CFLAGS) -c $^
 
-bot: mem-stats.o message-list.o x-additions.o string-additions.o talent-data.o bot.o
+bot: mem-stats.o x-additions.o string-additions.o talent-data.o bot.o
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@

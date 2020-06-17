@@ -14,7 +14,6 @@
 #include <X11/keysym.h>
 
 #include "mem-stats.h"
-#include "message-list.h"
 #include "x-additions.h"
 #include "string-additions.h"
 #include "talent-data.h"
@@ -28,15 +27,13 @@
 
 int search_memory(pid_t pid);
 void* search_at(void* args);
-void parse_xml(char* str, message_entry_t** new_list);
+void parse_xml(char* str);
 void on_new_message(int sender_id, char* sender_name, char* message);
 void send_build_message(char* hero, char* talent_tree);
 void send_error_message(char* str);
 void clear_chat();
 
-pthread_mutex_t list_lock;
 pthread_mutex_t output_lock;
-message_entry_t* tracked_messages_g = NULL;
 Display* x_display;
 char* channel_name_g;
 
@@ -45,7 +42,6 @@ struct search_arguments {
     void* start;
     size_t len;
     char* pattern;
-    message_entry_t** output_list;
 };
 
 int main(int argc, char* argv[]) {
@@ -66,7 +62,6 @@ int main(int argc, char* argv[]) {
     }
     x_display = XOpenDisplay(NULL);
 
-    pthread_mutex_init(&list_lock, NULL);
     pthread_mutex_init(&output_lock, NULL);
 
     printf("HIGHTLIGHT GAME WINDOW NOW!\n");
@@ -75,9 +70,7 @@ int main(int argc, char* argv[]) {
         search_memory(pid);
         sleep(2);
     }
-    free_message_list(tracked_messages_g);
 
-    pthread_mutex_destroy(&list_lock);
     pthread_mutex_destroy(&output_lock);
 }
 
@@ -119,7 +112,6 @@ int search_memory(pid_t pid) {
     sprintf(search_pattern, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%s\">", channel_name_g);
 
     pthread_t* tid = malloc(sizeof(pthread_t) * regions_count);   // one thread per region
-    message_entry_t* temp_message_list = NULL;
     int thread_no = 0;
     for (curr = last; curr != first; curr = curr->next) {
         if (curr->perms & PERMS_READ) {
@@ -128,7 +120,6 @@ int search_memory(pid_t pid) {
             args->start = curr->start;
             args->len = curr->length;
             args->pattern = search_pattern;
-            args->output_list = &temp_message_list;
             pthread_create(&tid[thread_no], NULL, search_at, args);
             thread_no++;
         }
@@ -140,9 +131,6 @@ int search_memory(pid_t pid) {
     ptrace(PTRACE_DETACH, pid, NULL, NULL);
     free(tid);
     free_mem_stats(list);
-
-    free_message_list(tracked_messages_g);
-    tracked_messages_g = temp_message_list;
 
     return 0;
 }
@@ -166,7 +154,9 @@ void* search_at(void* a) {
     for (size_t i = 0; i < args->len; i++) {
         if (buf[i] == args->pattern[0]) {
             if (!memcmp(buf + i, args->pattern, search_len)) {
-                parse_xml(buf + i, args->output_list);
+                parse_xml(buf + i);
+                // try to corrupt this message so that next time we don't catch it again
+                pwrite(fd, "\0", 1, (size_t)args->start + i);
                 i += strlen(buf + i) - 1;
             }
         }
@@ -181,25 +171,19 @@ error_malloc:
     return NULL;
 }
 
-void parse_xml(char* str, message_entry_t** new_list) {
+void parse_xml(char* str) {
+    printf("%s\n", str);
     int sender_id;
     char* sender_name = NULL;
     char* message = NULL;
+    clear_chat();   // try to free game memory
     if (sscanf(str, "<s val=\"BattleChatChannel\"><a name=\"ChannelName\" href=\"%*[^\"]\">[%*d. %*[^]]]</a> <a name=\"PresenceId\" href=\"%d\">%m[^:]:</a> %m[^<]</s>",
-        &sender_id, &sender_name, &message) < 3) {
-        goto leave;
-    }
-    if (!find_message(tracked_messages_g, sender_id, sender_name, message)) {
-        clear_chat();   // try to free game memory
+        &sender_id, &sender_name, &message) == 3) {
         if (message[0] == BOT_PREFIX) {
             on_new_message(sender_id, sender_name, message);
         }
     }
-    pthread_mutex_lock(&list_lock);
-    push_message(new_list, sender_id, sender_name, message);
-    pthread_mutex_unlock(&list_lock);
 
-leave:
     free(sender_name);
     free(message);
 }

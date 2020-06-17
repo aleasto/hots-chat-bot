@@ -24,7 +24,6 @@
 #define PROC_NAME "HeroesOfTheStor"
 #define MIN_ADDRESS 0x6000000
 #define MAX_ADDRESS 0x40000000
-#define EXCLUDE_MSG " Channel:" // `Joined Channel:` or Left Channel:`
 #define BOT_PREFIX '?'
 
 int search_memory(pid_t pid);
@@ -166,7 +165,7 @@ void* search_at(void* a) {
     int search_len = strlen(args->pattern);
     for (size_t i = 0; i < args->len; i++) {
         if (buf[i] == args->pattern[0]) {
-            if (!memcmp(buf + i, args->pattern, search_len) && !strstr(buf + i, EXCLUDE_MSG)) {
+            if (!memcmp(buf + i, args->pattern, search_len)) {
                 parse_xml(buf + i, args->output_list);
                 i += strlen(buf + i) - 1;
             }

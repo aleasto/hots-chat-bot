@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <pthread.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/ptrace.h>
@@ -194,15 +195,16 @@ void on_new_message(int sender_id, char* sender_name, char* message) {
     sscanf(message, "?%ms", &parsed_name);
     char* replaced_apos = str_replace(parsed_name, "&apos;", "");
     char* replaced_apos_dot = str_replace(replaced_apos, ".", "");
-    char* replaced_apos_dot_dash = str_replace(replaced_apos_dot, "-", "");
+    char* final_hero_name = str_replace(replaced_apos_dot, "-", "");
     free(replaced_apos);
     free(replaced_apos_dot);
 
-    char* talent_tree = search_talent_data(replaced_apos_dot_dash);
+    for (char* p = final_hero_name; *p; ++p) *p = tolower(*p);
+    char* talent_tree = search_talent_data(final_hero_name);
     char* out_buf = malloc(sizeof(char) * strlen(parsed_name) + 128);
     out_buf[0] = '\0';
     if (talent_tree != NULL) {
-        sprintf(out_buf, "[%s,%s]", talent_tree, replaced_apos_dot_dash);
+        sprintf(out_buf, "[%s,%s]", talent_tree, final_hero_name);
         free(talent_tree);
     } else {
         sprintf(out_buf, "Could not find hero %s", parsed_name);
@@ -211,7 +213,7 @@ void on_new_message(int sender_id, char* sender_name, char* message) {
 
     free(out_buf);
     free(parsed_name);
-    free(replaced_apos_dot_dash);
+    free(final_hero_name);
 }
 
 void send_message(char* str) {
